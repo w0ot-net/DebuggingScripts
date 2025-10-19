@@ -88,7 +88,7 @@ class OffsetsCallstackCommand(gdb.Command):
         
         if module:
             offset = addr - module['base']
-            return f"{module['name']}+0x{offset:x}"
+            return f"{module['name']} + 0x{offset:x}"
         else:
             # No module found, show the address in a readable format
             if addr > 0x7fff00000000:
