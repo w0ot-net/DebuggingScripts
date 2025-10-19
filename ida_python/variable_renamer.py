@@ -42,10 +42,13 @@ def renamer_usage():
     print("3. rename_function_and_vars(old_func_name, new_func_name, rename_map)")
     print("   Rename both the function and its variables in one call")
     print()
+    print("4. rename_global(old_name, new_name)")
+    print("   Rename a global variable or data label in the database")
+    print()
     print("PARAMETERS:")
     print("-" * 70)
-    print("  old_name/func_name : String - Current function name")
-    print("  new_name          : String - New function name")
+    print("  old_name/func_name : String - Current function/global name")
+    print("  new_name          : String - New function/global name")
     print("  rename_map        : Dict   - Dictionary mapping old variable names to new names")
     print()
     print("NAMING CONVENTION (STRONGLY RECOMMENDED):")
@@ -59,9 +62,17 @@ def renamer_usage():
     print("    sub_1C3D0  -> handle_sysinfo_request_sub_1C3D0")
     print("  WHY: Preserves the original address for reference and debugging")
     print()
-    print("★ For variables: Keep the original name as a suffix")
+    print("★ For local variables: Keep the original name as a suffix")
     print("  Format: <descriptive_name>_<original_name>")
     print("  Examples: counter_v4, buffer_v8, user_input_v1, input_param_a1")
+    print()
+    print("★ For global variables: Keep the original address/name as a suffix")
+    print("  Format: <descriptive_name>_<original_name>")
+    print("  Examples:")
+    print("    dword_404020 -> config_flags_dword_404020")
+    print("    unk_405120   -> encryption_key_unk_405120")
+    print("    byte_406000  -> initialized_flag_byte_406000")
+    print("    aHelloWorld  -> greeting_string_aHelloWorld")
     print()
     print("EXAMPLES:")
     print("-" * 70)
@@ -83,7 +94,12 @@ def renamer_usage():
     print('       "a1": "filename_a1"')
     print('   })')
     print()
-    print("4. Complete workflow example:")
+    print("4. Rename a global variable:")
+    print('   rename_global("dword_404020", "config_flags_dword_404020")')
+    print('   rename_global("unk_405120", "encryption_key_unk_405120")')
+    print('   rename_global("aHelloWorld", "greeting_string_aHelloWorld")')
+    print()
+    print("5. Complete workflow example:")
     print('   # First rename the function (keeping original suffix)')
     print('   rename_function("sub_C060", "serve_language_javascript_file_sub_C060")')
     print('   ')
@@ -94,6 +110,9 @@ def renamer_usage():
     print('       "v2": "f_param_v2",')
     print('       "v3": "f_value_v3"')
     print('   })')
+    print('   ')
+    print('   # Also rename any related globals')
+    print('   rename_global("dword_404020", "server_config_flags_dword_404020")')
     print()
     print("TIPS:")
     print("-" * 70)
@@ -102,13 +121,15 @@ def renamer_usage():
     print("• The plugin refreshes the decompiler view automatically after renaming")
     print("• Check the console output for detailed debug information")
     print("• Both local variables and function arguments can be renamed")
-    print("• Function names must be unique in the database")
-    print("• Keeping original names helps track function addresses and variable origins")
+    print("• Function and global names must be unique in the database")
+    print("• Keeping original names helps track addresses and variable origins")
+    print("• Global variables can be data labels, strings, or any named location")
     print()
     print("TROUBLESHOOTING:")
     print("-" * 70)
     print("• 'Function not found' - Check the exact function name")
-    print("• 'Name already exists' - Choose a different function name")
+    print("• 'Global not found' - Check the exact global variable name")
+    print("• 'Name already exists' - Choose a different name")
     print("• 'Hex-Rays not available' - Ensure you have the decompiler plugin")
     print("• 'Failed to rename' - Variable name might not exist or be invalid")
     print()
@@ -155,6 +176,86 @@ def rename_function(old_name: str, new_name: str) -> bool:
         return True
     else:
         print(f"[ERROR] Failed to rename function {old_name} to {new_name}")
+        return False
+
+def rename_global(old_name: str, new_name: str) -> bool:
+    """
+    Rename a global variable or data label in the IDA database.
+    
+    Args:
+        old_name: Current name of the global variable
+        new_name: New name for the global variable (should include original as suffix)
+        
+    Returns:
+        True if successful, False otherwise
+        
+    Example:
+        rename_global("dword_404020", "config_flags_dword_404020")
+        rename_global("unk_405120", "encryption_key_unk_405120")
+        rename_global("aHelloWorld", "greeting_string_aHelloWorld")
+    """
+    print(f"[DEBUG] Attempting to rename global: {old_name} -> {new_name}")
+    
+    # Get address by old name
+    ea = ida_name.get_name_ea(idaapi.BADADDR, old_name)
+    if ea == idaapi.BADADDR:
+        print(f"[ERROR] Global '{old_name}' not found in database")
+        return False
+    
+    print(f"[DEBUG] Global found at address: 0x{ea:X}")
+    
+    # Check what type of location this is
+    flags = idc.get_full_flags(ea)
+    if idc.is_code(flags) and ida_funcs.get_func(ea):
+        print(f"[WARNING] '{old_name}' appears to be a function, not a global variable")
+        print(f"[WARNING] Use rename_function() instead for functions")
+        return False
+    
+    # Check if new name already exists
+    if ida_name.get_name_ea(idaapi.BADADDR, new_name) != idaapi.BADADDR:
+        print(f"[ERROR] Name '{new_name}' already exists in database")
+        return False
+    
+    # Determine the type of global for better logging
+    global_type = "unknown"
+    if idc.is_strlit(flags):
+        global_type = "string"
+    elif idc.is_data(flags):
+        item_size = idc.get_item_size(ea)
+        if item_size == 1:
+            global_type = "byte"
+        elif item_size == 2:
+            global_type = "word"  
+        elif item_size == 4:
+            global_type = "dword"
+        elif item_size == 8:
+            global_type = "qword"
+        else:
+            global_type = f"data ({item_size} bytes)"
+    elif idc.is_unknown(flags):
+        global_type = "unknown/uninitialized"
+    elif idc.is_code(flags):
+        global_type = "code"
+    
+    print(f"[DEBUG] Global type: {global_type}")
+    
+    # Rename the global
+    if idc.set_name(ea, new_name, idc.SN_CHECK):
+        print(f"[SUCCESS] Renamed global {global_type}: {old_name} -> {new_name}")
+        
+        # Refresh the UI
+        ida_kernwin.request_refresh(ida_kernwin.IWID_DISASMS)
+        ida_kernwin.request_refresh(ida_kernwin.IWID_NAMES)
+        
+        # If a decompiler view is open, refresh it too
+        vdui = ida_hexrays.get_widget_vdui(ida_kernwin.get_current_widget())
+        if vdui:
+            vdui.refresh_view(True)
+            print("[DEBUG] Refreshed decompiler view")
+        
+        return True
+    else:
+        print(f"[ERROR] Failed to rename global {old_name} to {new_name}")
         return False
 
 def rename_function_variables(func_name: str, rename_map: Dict[str, str]) -> bool:
@@ -324,6 +425,7 @@ class VarRenamerPlugin(idaapi.plugin_t):
             import __builtin__ as builtins
         
         builtins.rename_function = rename_function
+        builtins.rename_global = rename_global
         builtins.rename_function_variables = rename_function_variables
         builtins.rename_function_and_vars = rename_function_and_vars
         builtins.renamer_usage = renamer_usage
@@ -334,11 +436,13 @@ class VarRenamerPlugin(idaapi.plugin_t):
         print("Available functions in Python console:")
         print("  • renamer_usage()  - Show usage instructions")
         print("  • rename_function(old_name, new_name) - Rename a function")
+        print("  • rename_global(old_name, new_name) - Rename a global variable")
         print("  • rename_function_variables(func_name, rename_map) - Rename variables")
         print("  • rename_function_and_vars(old, new, map) - Rename both")
         print()
         print("REMEMBER: Keep original names as suffixes!")
         print("  Functions: sub_401000 -> parse_config_sub_401000")
+        print("  Globals: dword_404020 -> config_flags_dword_404020")
         print("  Variables: v1 -> config_buffer_v1")
         print("=" * 70)
         
