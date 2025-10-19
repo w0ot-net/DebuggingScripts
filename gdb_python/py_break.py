@@ -29,7 +29,9 @@ class ModuleLoadHandler:
         if not self.enabled:
             try:
                 # Set a catchpoint for shared library events
-                gdb.execute("catch load", to_string=True)
+                bp_num = gdb.execute("catch load", to_string=True)
+                # Make the catchpoint auto-continue
+                gdb.execute("commands\nsilent\ncontinue\nend", to_string=True)
                 self.enabled = True
             except:
                 pass
