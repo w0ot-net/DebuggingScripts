@@ -2,6 +2,49 @@ import gdb
 import struct
 import re
 
+# ============================================================================
+# WARNING: THESE OFFSETS ARE SPECIFIC TO YOUR BINARY VERSION!
+# You MUST update these values for each different version of the binary.
+# These are the offsets from the binary base address to the stack pointers.
+# ============================================================================
+
+"""
+  stack_bottom_v1 = ps_stack_bottom_qword_4764F0;
+  result = ps_stack_top_qword_4764F8;
+  temp_value_v2 = ps_stack_top_qword_4764F8 - 16;
+  if ( ps_stack_bottom_qword_4764F0 > (unsigned __int64)(ps_stack_top_qword_4764F8 - 16) )
+"""
+PS_STACK_BASE_OFFSET = 0x4764F0  # qword_4764F0 - stack bottom
+PS_STACK_SP_OFFSET = 0x4764F8    # qword_4764F8 - stack top/pointer
+
+# Global variables to cache the addresses (computed once)
+_ps_sp_addr = None
+_ps_base_addr = None
+_base_addr = None
+
+def get_ps_addresses():
+    """Get the PS stack addresses, computing them only once"""
+    global _ps_sp_addr, _ps_base_addr, _base_addr
+    
+    if _ps_sp_addr is None or _ps_base_addr is None:
+        # Get base dynamically using GEF's new API
+        vmmap = gef.memory.maps  # Use new GEF API
+        _base_addr = None
+        
+        for entry in vmmap:
+            if entry.path and 'thumb' in entry.path and entry.is_executable():
+                _base_addr = entry.page_start
+                break
+                
+        if not _base_addr:
+            raise Exception("Could not find thumb base")
+            
+        # Calculate addresses only once
+        _ps_base_addr = _base_addr + PS_STACK_BASE_OFFSET
+        _ps_sp_addr = _base_addr + PS_STACK_SP_OFFSET
+        
+    return _base_addr, _ps_sp_addr, _ps_base_addr
+
 class PSStackCommand(gdb.Command):
     """Visualize the PostScript operand stack"""
     
@@ -25,8 +68,8 @@ class PSStackCommand(gdb.Command):
     def get_thumb_base(self):
         """Get thumb base address from vmmap"""
         try:
-            # Use GEF's get_process_maps function
-            vmmap = get_process_maps()  # GEF function in global namespace
+            # Use GEF's new API
+            vmmap = gef.memory.maps  # Use new GEF API
             
             # Look for the first executable mapping of /usr/bin/thumb
             for entry in vmmap:
@@ -176,25 +219,10 @@ class PSStackCommand(gdb.Command):
     def invoke(self, arg, from_tty):
         above_below_show = 10
         try:
-            # Get base dynamically using GEF's get_process_maps
-            vmmap = get_process_maps()  # GEF function
-            base_addr = None
+            # Get addresses (computed only once)
+            base_addr, ps_sp_addr, ps_base_addr = get_ps_addresses()
             
-            for entry in vmmap:
-                if entry.path and 'thumb' in entry.path and entry.is_executable():
-                    base_addr = entry.page_start
-                    break
-                    
-            if not base_addr:
-                print("Could not find thumb base")
-                return
-                
             print(f"Using thumb base address: {base_addr:#x}")
-            
-            # Calculate stack pointer addresses
-            ps_sp_addr = base_addr + 0x4F14D0
-            ps_base_addr = base_addr + 0x4F14F8
-            
             print(f"Reading stack pointer from: {ps_sp_addr:#x}")
             print(f"Reading base pointer from: {ps_base_addr:#x}")
             
@@ -306,21 +334,8 @@ class PSStackRawCommand(gdb.Command):
         
     def invoke(self, arg, from_tty):
         try:
-            # Get base dynamically using GEF's get_process_maps
-            vmmap = get_process_maps()  # GEF function
-            base_addr = None
-            
-            for entry in vmmap:
-                if entry.path and 'thumb' in entry.path and entry.is_executable():
-                    base_addr = entry.page_start
-                    break
-                    
-            if not base_addr:
-                print("Could not find thumb base")
-                return
-                
-            ps_sp_addr = base_addr + 0x4F14D0
-            ps_base_addr = base_addr + 0x4F14F8
+            # Get addresses (computed only once)
+            base_addr, ps_sp_addr, ps_base_addr = get_ps_addresses()
             
             print(f"Stack pointer location: {ps_sp_addr:#x}")
             gdb.execute(f"x/2gx {ps_sp_addr:#x}")
@@ -337,3 +352,10 @@ print("PostScript stack visualizer loaded!")
 print("Commands:")
 print("  ps-stack     - Show current PostScript stack")
 print("  ps-stack-raw - Show raw pointer values")
+print("")
+print("=" * 60)
+print("WARNING: Stack pointer offsets are hardcoded for THIS binary!")
+print(f"  PS_STACK_BASE_OFFSET = 0x{PS_STACK_BASE_OFFSET:X}")
+print(f"  PS_STACK_SP_OFFSET   = 0x{PS_STACK_SP_OFFSET:X}")
+print("Update these values if using a different binary version!")
+print("=" * 60)
